@@ -12,36 +12,7 @@ plugins {
     id("kotlinx-serialization")
 }
 
-open class KtorTestServer : DefaultTask() {
-    @Internal
-    var server: Closeable? = null
-        private set
-
-    @Internal
-    lateinit var main: String
-
-    @Internal
-    lateinit var classpath: FileCollection
-
-    @TaskAction
-    fun exec() {
-        try {
-            println("[TestServer] start")
-            val urlClassLoaderSource = classpath.map { file -> file.toURI().toURL() }.toTypedArray()
-            val loader = URLClassLoader(urlClassLoaderSource, ClassLoader.getSystemClassLoader())
-
-            val mainClass = loader.loadClass(main)
-            val main = mainClass.getMethod("startServer")
-            server = main.invoke(null) as Closeable
-            println("[TestServer] started")
-        } catch (cause: Throwable) {
-            println("[TestServer] failed: ${cause.message}")
-            cause.printStackTrace()
-        }
-    }
-}
-
-val osName = System.getProperty("os.name")
+val osName: String = System.getProperty("os.name")
 
 kotlin.sourceSets {
     commonMain {
@@ -102,34 +73,26 @@ kotlin.sourceSets {
         }
     }
 
-    if (rootProject.ext.get("native_targets_enabled") as Boolean) {
-        listOf("linuxX64Test", "mingwX64Test", "macosX64Test").map { getByName(it) }.forEach {
-            it.dependencies {
-                api(project(":ktor-client:ktor-client-curl"))
-            }
-        }
+    if (!(rootProject.ext.get("native_targets_enabled") as Boolean)) return@sourceSets
 
-        if (!osName.startsWith("Windows")) {
-            listOf("linuxX64Test", "macosX64Test", "iosX64Test").map { getByName(it) }.forEach {
-                it.dependencies {
-                    api(project(":ktor-client:ktor-client-cio"))
-                }
-            }
+    listOf("linuxX64Test", "mingwX64Test", "macosX64Test").map { getByName(it) }.forEach {
+        it.dependencies {
+            api(project(":ktor-client:ktor-client-curl"))
         }
-        listOf("iosX64Test", "macosX64Test", "macosArm64Test").map { getByName(it) }.forEach {
+    }
+
+    if (!osName.startsWith("Windows")) {
+        listOf("linuxX64Test", "macosX64Test", "iosX64Test").map { getByName(it) }.forEach {
             it.dependencies {
-                api(project(":ktor-client:ktor-client-darwin"))
+                api(project(":ktor-client:ktor-client-cio"))
             }
         }
     }
-}
-
-val startTestServer = task<KtorTestServer>("startTestServer") {
-    dependsOn(tasks["jvmJar"])
-
-    main = "io.ktor.client.tests.utils.TestServerKt"
-    val kotlinCompilation = kotlin.targets.getByName("jvm").compilations["test"]
-    classpath = (kotlinCompilation as KotlinCompilationToRunnableFiles<*>).runtimeDependencyFiles
+    listOf("iosX64Test", "macosX64Test", "macosArm64Test").map { getByName(it) }.forEach {
+        it.dependencies {
+            api(project(":ktor-client:ktor-client-darwin"))
+        }
+    }
 }
 
 val testTasks = mutableListOf(
@@ -142,10 +105,7 @@ val testTasks = mutableListOf(
     "jsIrBrowserTest",
 
     "posixTest",
-    "darwinTest"
-)
-
-testTasks += listOf(
+    "darwinTest",
     "macosX64Test",
     "macosArm64Test",
     "linuxX64Test",
@@ -153,48 +113,30 @@ testTasks += listOf(
     "mingwX64Test"
 )
 
-rootProject.allprojects {
-    if (!path.contains("ktor-client") || path.contains("ktor-shared")) {
-        return@allprojects
-    }
-    val tasks = tasks.matching { it.name in testTasks }
-    configure(tasks) {
-        dependsOn(startTestServer)
-        kotlin.sourceSets {
+afterEvaluate {
+    val kotlinCompilation = kotlin.targets.getByName("jvm").compilations["test"]
+    val classpath = (kotlinCompilation as KotlinCompilationToRunnableFiles<*>).runtimeDependencyFiles
+        .map { file -> file.toURI().toURL() }.toTypedArray()
 
-            if (!(rootProject.ext.get("native_targets_enabled") as Boolean)) {
-                return@sourceSets
-            }
-            if (name in listOf("macosX64Test", "linuxX64Test", "mingwX64Test")) {
-                getByName(name) {
-                    dependencies {
-                        api(project(":ktor-client:ktor-client-curl"))
-                    }
-                }
-            }
-            if (name in listOf("macosX64Test", "linuxX64Test", "iosX64Test")) {
-                getByName(name) {
-                    dependencies {
-                        api(project(":ktor-client:ktor-client-cio"))
-                    }
-                }
-            }
-            if (name in listOf("macosX64Test", "iosX64Test")) {
-                getByName(name) {
-                    dependencies {
-                        api(project(":ktor-client:ktor-client-darwin"))
-                    }
-                }
+    val testServer = gradle.sharedServices.registerIfAbsent("ktor-test-server", KtorTestServer::class.java) {
+        parameters {
+            serverClasspath.set(classpath)
+            main.set("io.ktor.client.tests.utils.TestServerKt")
+        }
+    }
+
+    rootProject.allprojects {
+        if (!path.contains("ktor-client") || path.contains("ktor-shared")) return@allprojects
+
+        val tasks = tasks.matching { it.name in testTasks }
+        configure(tasks) {
+            usesService(testServer)
+
+            doFirst {
+                testServer.get()
             }
         }
     }
 }
 
 useJdkVersionForJvmTests(11)
-
-gradle.buildFinished {
-    if (startTestServer.server != null) {
-        startTestServer.server?.close()
-        println("[TestServer] stop")
-    }
-}
