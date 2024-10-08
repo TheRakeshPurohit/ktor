@@ -1,6 +1,6 @@
 // Klib ABI Dump
-// Targets: [iosArm64, iosSimulatorArm64, iosX64, js, linuxArm64, linuxX64, macosArm64, macosX64, mingwX64, tvosArm64, tvosSimulatorArm64, tvosX64, wasmJs, watchosArm32, watchosArm64, watchosDeviceArm64, watchosSimulatorArm64, watchosX64]
-// Alias: native => [iosArm64, iosSimulatorArm64, iosX64, linuxArm64, linuxX64, macosArm64, macosX64, mingwX64, tvosArm64, tvosSimulatorArm64, tvosX64, watchosArm32, watchosArm64, watchosDeviceArm64, watchosSimulatorArm64, watchosX64]
+// Targets: [androidNativeArm32, androidNativeArm64, androidNativeX64, androidNativeX86, iosArm64, iosSimulatorArm64, iosX64, js, linuxArm64, linuxX64, macosArm64, macosX64, mingwX64, tvosArm64, tvosSimulatorArm64, tvosX64, wasmJs, watchosArm32, watchosArm64, watchosDeviceArm64, watchosSimulatorArm64, watchosX64]
+// Alias: native => [androidNativeArm32, androidNativeArm64, androidNativeX64, androidNativeX86, iosArm64, iosSimulatorArm64, iosX64, linuxArm64, linuxX64, macosArm64, macosX64, mingwX64, tvosArm64, tvosSimulatorArm64, tvosX64, watchosArm32, watchosArm64, watchosDeviceArm64, watchosSimulatorArm64, watchosX64]
 // Rendering settings:
 // - Signature version: 2
 // - Show manifest properties: true
@@ -333,9 +333,6 @@ final class io.ktor.client.plugins.cache/HttpCache { // io.ktor.client.plugins.c
     final class Config { // io.ktor.client.plugins.cache/HttpCache.Config|null[0]
         constructor <init>() // io.ktor.client.plugins.cache/HttpCache.Config.<init>|<init>(){}[0]
 
-        final var cacheRequestWithAuth // io.ktor.client.plugins.cache/HttpCache.Config.cacheRequestWithAuth|{}cacheRequestWithAuth[0]
-            final fun <get-cacheRequestWithAuth>(): kotlin/Boolean // io.ktor.client.plugins.cache/HttpCache.Config.cacheRequestWithAuth.<get-cacheRequestWithAuth>|<get-cacheRequestWithAuth>(){}[0]
-            final fun <set-cacheRequestWithAuth>(kotlin/Boolean) // io.ktor.client.plugins.cache/HttpCache.Config.cacheRequestWithAuth.<set-cacheRequestWithAuth>|<set-cacheRequestWithAuth>(kotlin.Boolean){}[0]
         final var isShared // io.ktor.client.plugins.cache/HttpCache.Config.isShared|{}isShared[0]
             final fun <get-isShared>(): kotlin/Boolean // io.ktor.client.plugins.cache/HttpCache.Config.isShared.<get-isShared>|<get-isShared>(){}[0]
             final fun <set-isShared>(kotlin/Boolean) // io.ktor.client.plugins.cache/HttpCache.Config.isShared.<set-isShared>|<set-isShared>(kotlin.Boolean){}[0]
