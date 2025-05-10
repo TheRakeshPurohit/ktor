@@ -68,7 +68,7 @@ public val DI: ApplicationPlugin<DependencyInjectionConfig> =
         val configMap = ConfigurationDependencyMap(application.environment.config)
         val dependenciesMap = pluginConfig.dependenciesMap?.let { it + configMap } ?: configMap
 
-        var registry = DependencyRegistryImpl(
+        var registry = DependencyRegistry(
             provider,
             dependenciesMap,
             pluginConfig.resolution,
@@ -79,7 +79,7 @@ public val DI: ApplicationPlugin<DependencyInjectionConfig> =
             for (reference in configuredDependencyReferences) {
                 installReference(registry, reference)
             }
-            monitor.subscribe(ApplicationStarted) {
+            monitor.subscribe(ApplicationModulesLoaded) {
                 registry.validate()
             }
             attributes.put(DependencyRegistryKey, registry)
@@ -198,7 +198,6 @@ public data class DependencyKey(
     public val name: String? = null,
     public val qualifier: Any? = null,
 ) {
-
     override fun toString(): String = buildString {
         append(type.kotlinType ?: type.type)
         if (name != null) {

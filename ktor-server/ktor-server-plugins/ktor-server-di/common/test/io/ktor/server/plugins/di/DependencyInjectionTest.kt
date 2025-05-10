@@ -7,10 +7,12 @@ package io.ktor.server.plugins.di
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.server.application.*
+import io.ktor.server.plugins.di.dependencies
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.*
 import io.ktor.server.testing.*
 import io.ktor.test.dispatcher.runTestWithRealTime
+import io.ktor.util.logging.Logger
 import io.ktor.util.reflect.*
 import kotlinx.coroutines.test.TestResult
 import kotlinx.serialization.Serializable
@@ -117,8 +119,16 @@ class DependencyInjectionTest {
 
     @Test
     fun `fails on server startup`() = runTestWithRealTime {
+        val infoLogs = mutableListOf<String>()
         assertFailsWith<MissingDependencyException> {
             runTestApplication {
+                environment {
+                    log = object : Logger by log {
+                        override fun info(message: String) {
+                            infoLogs += message
+                        }
+                    }
+                }
                 application {
                     val service: GreetingService by dependencies
                     routing {
@@ -135,6 +145,11 @@ class DependencyInjectionTest {
                 fail("Expected to throw on missing dependency but got $response")
             }
         }
+        assertFalse(
+            infoLogs.any { message ->
+                "Application started" in message
+            }
+        )
     }
 
     @Test
@@ -261,7 +276,7 @@ class DependencyInjectionTest {
     fun `custom provider`() = testApplication {
         val assignmentKeys = mutableListOf<DependencyKey>()
         install(DI) {
-            var delegate = MapDependencyProvider()
+            val delegate = MapDependencyProvider()
             provider = object : DependencyProvider by delegate {
                 override fun <T> set(
                     key: DependencyKey,

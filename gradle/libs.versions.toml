@@ -68,11 +68,11 @@ jakarta-servlet = "5.0.0"
 ws = "8.18.0"
 xmlutil = "0.91.0"
 yamlkt = "0.13.0"
-kaml = "0.73.0"
+kaml = "0.77.1"
 
 swagger-codegen = "3.0.68"
 swagger-codegen-generators = "1.0.56"
-swagger-parser = "2.1.26"
+swagger-parser = "2.1.27"
 
 puppeteer = "21.5.0"
 tomlj = "1.1.1"
