@@ -337,7 +337,7 @@ actual constructor(
             engine.resolvedConnectors().forEach {
                 val host = escapeHostname(it.host)
                 environment.log.info(
-                    "Responding at ${it.type.name.lowercase()}://$host:${it.port}"
+                    "Responding at ${it.type.name.lowercase()}:$it"
                 )
             }
         }
@@ -393,6 +393,7 @@ actual constructor(
             modules.forEach { module -> module(newInstance, currentClassLoader) }
         }
 
+        monitor.raise(ApplicationModulesLoaded, newInstance)
         monitor.raise(ApplicationStarted, newInstance)
 
         return newInstance
