@@ -1227,6 +1227,7 @@ public final class io/ktor/client/request/HttpRequestJvmKt {
 }
 
 public final class io/ktor/client/request/HttpRequestKt {
+	public static final fun forEachHeader (Lio/ktor/client/request/HttpRequestData;Lkotlin/jvm/functions/Function2;)V
 	public static final fun getResponseAdapterAttributeKey ()Lio/ktor/util/AttributeKey;
 	public static final fun headers (Lio/ktor/http/HttpMessageBuilder;Lkotlin/jvm/functions/Function1;)Lio/ktor/http/HeadersBuilder;
 	public static final fun invoke (Lio/ktor/client/request/HttpRequestBuilder$Companion;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Lio/ktor/client/request/HttpRequestBuilder;
@@ -1298,6 +1299,22 @@ public abstract interface class io/ktor/client/request/ResponseAdapter {
 public final class io/ktor/client/request/SSEClientResponseAdapter : io/ktor/client/request/ResponseAdapter {
 	public fun <init> ()V
 	public fun adapt (Lio/ktor/client/request/HttpRequestData;Lio/ktor/http/HttpStatusCode;Lio/ktor/http/Headers;Lio/ktor/utils/io/ByteReadChannel;Lio/ktor/http/content/OutgoingContent;Lkotlin/coroutines/CoroutineContext;)Ljava/lang/Object;
+}
+
+public final class io/ktor/client/request/UnixSocketCapability : io/ktor/client/engine/HttpClientEngineCapability {
+	public static final field INSTANCE Lio/ktor/client/request/UnixSocketCapability;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/ktor/client/request/UnixSocketSettings {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun getPath ()Ljava/lang/String;
+}
+
+public final class io/ktor/client/request/UnixSockets_jvmAndPosixKt {
+	public static final fun unixSocket (Lio/ktor/client/request/HttpRequestBuilder;Ljava/lang/String;)V
 }
 
 public final class io/ktor/client/request/UtilsKt {
