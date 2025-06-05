@@ -20,6 +20,23 @@ import kotlin.reflect.KFunction
 import kotlin.reflect.jvm.javaMethod
 import kotlin.test.*
 
+interface Identifiable<ID> {
+    val id: ID
+}
+interface Repository<E : Identifiable<ID>, ID> : ReadOnlyRepository<E, ID>
+class ListRepository<E : Identifiable<ID>, ID>(
+    val list: List<E>
+) : Repository<E, ID> {
+    override fun getAll(): List<E> = list
+}
+interface ReadOnlyRepository<out E : Identifiable<ID>, ID> {
+    fun getAll(): List<E>
+}
+interface User : Identifiable<Long> {
+    val name: String
+}
+data class FullUser(override val id: Long, override val name: String, val email: String) : User
+
 class DependencyInjectionJvmTest {
 
     @Test
@@ -62,9 +79,9 @@ class DependencyInjectionJvmTest {
     @Test
     fun `circular references from create`() = runTestDI {
         dependencies {
-            provide<WorkExperience> { WorkExperience(this.resolve()) }
-            provide<PaidWork> { PaidWork(this.resolve()) }
-            provide<List<PaidWork>> { listOf(this.resolve()) }
+            provide<WorkExperience> { WorkExperience(resolve()) }
+            provide<PaidWork> { PaidWork(resolve()) }
+            provide<List<PaidWork>> { listOf(resolve()) }
         }
 
         assertFailsWith<CircularDependencyException> {
@@ -144,13 +161,16 @@ class DependencyInjectionJvmTest {
     @Test
     fun `parameterized covariant argument supertypes`() = runTestDI {
         val mySet = HashSet<String>()
+        val myMap = mutableMapOf("hello" to GreetingServiceImpl())
 
         dependencies {
             provide { mySet }
+            provide { myMap }
             provide<() -> String> { { mySet.iterator().next() } }
         }
         // `out` bounds should match supertypes
         assertEquals(mySet, dependencies.resolve<Collection<CharSequence>>())
+        assertEquals(myMap, dependencies.resolve<Map<String, GreetingService>>())
         // return types in lambdas accept supertypes
         assertNotNull(dependencies.resolve<() -> CharSequence>())
         // strict bounds should not match
@@ -193,12 +213,6 @@ class DependencyInjectionJvmTest {
         assertNotNull(dependencies.resolve<(String) -> Boolean>())
     }
 
-    /**
-     * [KTOR-8322 Handle delegate pattern](https://youtrack.jetbrains.com/issue/KTOR-8322/Dependency-injection-handle-delegate-pattern)
-     *     When declaring two classes that share an interface via delegation,
-     *     we should resolve the ambiguity automatically.
-     */
-    @Ignore
     @Test
     fun `install class ref with args from config`() {
         testConfigFile(
@@ -226,7 +240,7 @@ class DependencyInjectionJvmTest {
         testConfigFile(
             ::createGreetingService.qualifiedName,
             ::createBankService.qualifiedName,
-            DependencyResolver::createBankTellerNoArgs.qualifiedName,
+            DependencyRegistry::createBankTellerNoArgs.qualifiedName,
         ) {
             val teller: BankTeller by dependencies
             assertEquals(HELLO, teller.hello())
@@ -368,6 +382,37 @@ class DependencyInjectionJvmTest {
             test = {
                 assertEquals(HttpStatusCode.OK, client.get("/data").status)
             }
+        )
+    }
+
+    @Test
+    fun `resolve flexible and nullable types`() = runTestDI {
+        fun getString(): String? = "hello"
+
+        dependencies {
+            provide { System.out }
+            provide { getString() }
+        }
+        val out: java.io.PrintStream by dependencies
+        val string: String by dependencies
+        assertEquals(System.out, out)
+        assertEquals("hello", string)
+    }
+
+    @Test
+    fun `resolve type parameter hierarchy with boundaries`() = runTestDI {
+        val joey = FullUser(1L, "Joey", "joey.bloggs@joey.blog")
+        dependencies {
+            provide { ListRepository(listOf(joey)) }
+        }
+
+        assertEquals(
+            listOf(joey),
+            dependencies.resolve<ReadOnlyRepository<User, Long>>().getAll()
+        )
+        assertEquals(
+            listOf(joey),
+            dependencies.resolve<ReadOnlyRepository<Identifiable<Long>, Long>>().getAll()
         )
     }
 
