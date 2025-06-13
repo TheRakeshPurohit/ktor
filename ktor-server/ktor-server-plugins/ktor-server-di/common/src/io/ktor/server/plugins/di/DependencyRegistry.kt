@@ -5,34 +5,158 @@
 package io.ktor.server.plugins.di
 
 import io.ktor.server.application.*
-import io.ktor.server.plugins.di.MutableDependencyMap.Companion.asResolver
-import io.ktor.util.reflect.typeInfo
 import io.ktor.utils.io.*
+import kotlinx.coroutines.Deferred
 import kotlin.properties.ReadOnlyProperty
+import kotlin.reflect.KClass
 import kotlin.reflect.KProperty
 
 /**
- * Combined abstraction for dependency provider and resolver.
+ * A central registry for managing and resolving dependencies within a dependency injection context.
  *
- * This is a stateful type that can verify that all required dependencies can be resolved.
+ * The `DependencyRegistry` class acts as both a `DependencyProvider` and a `DependencyResolver`.
+ * It facilitates the registration of dependencies through a `DependencyProvider` as well as the resolution
+ * and validation of dependencies using the provided resolver mechanism. This registry also supports
+ * reflective creation of instances and type-safe access to registered dependencies.
+ *
+ * @param resolver The delegate resolver for finding registered dependencies.
+ * @param provider The delegate provider responsible for registering new dependencies..
+ * @param reflection A reflection implementation that supports dynamic instantiation of classes.
  */
 @KtorDsl
-public interface DependencyRegistry : DependencyProvider, DependencyResolver {
+public class DependencyRegistry(
+    public val resolver: DependencyResolver,
+    public val provider: DependencyProvider,
+) : DependencyProvider by provider, DependencyResolver by resolver {
+    /**
+     * A map of required dependencies to be validated during startup.
+     *
+     * Used for lazily retrieved values.
+     */
+    internal val requirements = mutableMapOf<DependencyKey, DependencyReference>()
+
+    /**
+     * A map of shutdown hooks to be executed during shutdown.
+     *
+     * Supplied by the "cleanup" function.
+     */
+    internal val shutdownHooks = mutableMapOf<DependencyKey, (Any?) -> Unit>()
+
+    /**
+     * Get the dependency from the map for the key represented by the type (and optionally, with the given name).
+     */
+    public suspend inline fun <reified T> resolve(key: String? = null): T =
+        get(DependencyKey<T>(key))
+
+    /**
+     * Get a deferred dependency from the map for the key represented by the type (and optionally, with the given name).
+     */
+    public inline fun <reified T> resolveDeferred(key: String? = null): Deferred<T> =
+        getDeferred(DependencyKey<T>(key))
 
     /**
      * Indicates that the given dependency is required.
      *
-     * This is ensured after `validate()` is called.
+     * The DI plugin enforces this at startup.
      */
-    public fun require(key: DependencyKey)
+    public fun require(key: DependencyKey) {
+        requirements += key to DependencyReference()
+    }
 
     /**
-     * Performs resolutions, ensuring there are no missing dependencies.
+     * Provides a delegated property for accessing a dependency from a [DependencyRegistry].
+     * This operator function allows property delegation, ensuring the required dependency is
+     * registered and retrievable through the registry.
      *
-     * @throws DependencyInjectionException if there are invalid references in the configuration
+     * Example usage:
+     * ```
+     * val repository: Repository<Message> by dependencies
+     * ```
+     *
+     * @param thisRef The receiver to which the property is being delegated. This parameter
+     * is not used in the actual implementation.
+     * @param prop The property for which the delegate is being requested.
+     * @return A [ReadOnlyProperty] that provides access to the resolved dependency of type [T].
+     * @throws DependencyInjectionException If the dependency required by [prop] is not resolvable
+     * during access.
      */
-    public fun validate()
+    public inline operator fun <reified T> provideDelegate(
+        thisRef: Any?,
+        prop: KProperty<*>
+    ): ReadOnlyProperty<Any?, T> {
+        val key = DependencyKey<T>()
+            .also(::require)
+        return ReadOnlyProperty { _, _ ->
+            getBlocking(key)
+        }
+    }
+
+    /**
+     * Provides an instance of the dependency associated with the specified [kClass].
+     *
+     * Uses the `create` method from the `DependencyResolver` to resolve and instantiate a dependency
+     * of type [T] specified by the given [kClass].
+     *
+     * @param T The type of the dependency to be provided.
+     * @param kClass The `KClass` representing the type of the dependency to be created or resolved.
+     */
+    public inline fun <reified T : Any> provide(kClass: KClass<out T>): KeyContext<T> =
+        provide<T> { create(kClass) }
+
+    /**
+     * Creates a new `KeyContext` for the specified type [T] and an optional name.
+     * The given [handler] is invoked on the created `KeyContext`, allowing configuration
+     * such as defining a provider or cleanup logic for the dependency.
+     *
+     * @param T The type of the dependency being handled.
+     * @param name An optional name associated with the dependency. Defaults to `null` if not provided.
+     * @param handler A lambda that defines the actions to be performed on the created `KeyContext`.
+     * @return A `KeyContext` instance representing the defined key and its associated actions.
+     */
+    public inline fun <reified T> key(name: String? = null, noinline handler: KeyContext<T>.() -> Unit): KeyContext<T> =
+        KeyContext<T>(DependencyKey<T>(name)).also(handler)
+
+    /**
+     * Basic call for providing a dependency, like `provide<Service> { ServiceImpl() }`.
+     */
+    public inline fun <reified T> provide(
+        name: String? = null,
+        noinline provide: suspend DependencyResolver.() -> T?
+    ): KeyContext<T> =
+        key<T>(name) { provide(provide) }
+
+    public inline fun <reified T> cleanup(name: String? = null, noinline cleanup: (T) -> Unit): KeyContext<T> =
+        key<T>(name) { cleanup(cleanup) }
+
+    public fun cleanup(key: DependencyKey, cleanup: (Any?) -> Unit) {
+        require(!shutdownHooks.contains(key)) {
+            "Shutdown hook already registered for $this"
+        }
+        shutdownHooks[key] = cleanup
+    }
+
+    /**
+     * DSL class for performing multiple actions for the given key and type.
+     */
+    @KtorDsl
+    public inner class KeyContext<T>(public val key: DependencyKey) {
+        public infix fun provide(provide: suspend DependencyResolver.() -> T?) {
+            this@DependencyRegistry.set(key, provide)
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        public infix fun cleanup(cleanup: (T) -> Unit) {
+            this@DependencyRegistry.cleanup(key) { cleanup(it as T) }
+        }
+    }
 }
+
+/**
+ * DSL helper for declaring dependencies with `dependencies {}` block.
+ */
+@KtorDsl
+public fun <T> Application.dependencies(action: DependencyRegistry.() -> T): T =
+    dependencies.action()
 
 public var Application.dependencies: DependencyRegistry
     get() {
@@ -46,147 +170,23 @@ public var Application.dependencies: DependencyRegistry
     }
 
 /**
- * Basic implementation of [DependencyRegistry], which is a façade of [DependencyProvider] and a late-initialized
- * [DependencyResolver].  The resolver is available after the first call to a get function is made, which triggers the
- * [DependencyResolution] process to populate the instances.
- */
-public class DependencyRegistryImpl(
-    private val provider: DependencyProvider,
-    private val external: DependencyMap,
-    private val resolution: DependencyResolution,
-    public override val reflection: DependencyReflection,
-) : DependencyRegistry, DependencyProvider by provider {
-
-    private val requiredKeys = mutableSetOf<DependencyKey>()
-    private val resolver: Lazy<DependencyResolver> = lazy {
-        resolution.resolve(provider, external, reflection)
-    }
-
-    override fun <T> set(key: DependencyKey, value: DependencyResolver.() -> T) {
-        if (resolver.isInitialized()) throw OutOfOrderDependencyException(key)
-        provider.set(key, value)
-    }
-
-    override fun contains(key: DependencyKey): Boolean =
-        resolver.value.contains(key)
-
-    override fun <T> get(key: DependencyKey): T =
-        resolver.value.get(key)
-
-    override fun <T> getOrPut(key: DependencyKey, defaultValue: () -> T): T =
-        resolver.value.getOrPut(key, defaultValue)
-
-    override fun require(key: DependencyKey) {
-        requiredKeys += key
-    }
-
-    override fun validate() {
-        for (key in requiredKeys) {
-            resolver.value.get<Any>(key)
-        }
-    }
-}
-
-/**
- * Provides a delegated property for accessing a dependency from a [DependencyRegistry].
- * This operator function allows property delegation, ensuring the required dependency is
- * registered and retrievable through the registry.
+ * Used for tracing references to dependency keys in the application.
  *
- * Example usage:
- * ```
- * val repository: Repository<Message> by dependencies
- * ```
- *
- * @param thisRef The receiver to which the property is being delegated. This parameter
- * is not used in the actual implementation.
- * @param prop The property for which the delegate is being requested.
- * @return A [ReadOnlyProperty] that provides access to the resolved dependency of type [T].
- * @throws DependencyInjectionException If the dependency required by [prop] is not resolvable
- * during access.
+ * Both called for lazy `resolve` access and `provide` for easier debugging.
  */
-public inline operator fun <reified T> DependencyRegistry.provideDelegate(
-    thisRef: Any?,
-    prop: KProperty<*>
-): ReadOnlyProperty<Any?, T> {
-    val key = DependencyKey(typeInfo<T>())
-        .also(::require)
-    return ReadOnlyProperty { _, _ ->
-        this@provideDelegate.get(key)
-    }
-}
+internal class DependencyReference : Throwable() {
 
-/**
- * Standard [DependencyResolution] implementation, which populates a map of instances using
- * [ProcessingDependencyResolver].
- */
-public val DefaultDependencyResolution: DependencyResolution =
-    DependencyResolution { provider, external, reflection ->
-        val injector = ProcessingDependencyResolver(
-            reflection,
-            provider,
-            external,
-        )
+    /**
+     * Gets the first external API line from the stack trace.
+     */
+    fun externalTraceLine(): String =
+        externalTrace().substringBefore('\n').trim()
 
-        DependencyMapImpl(injector.resolveAll(), external)
-            .asResolver(reflection)
-    }
-
-/**
- * A short-lived resolver for populating a map of instances.
- */
-@Suppress("UNCHECKED_CAST")
-public class ProcessingDependencyResolver(
-    override val reflection: DependencyReflection,
-    private val provider: DependencyProvider,
-    private val external: DependencyMap,
-) : DependencyResolver {
-    private val resolved = mutableMapOf<DependencyKey, Result<*>>()
-    private val visited = mutableSetOf<DependencyKey>()
-
-    public fun resolveAll(): Map<DependencyKey, Result<*>> {
-        if (resolved.isNotEmpty()) return resolved.toMap()
-
-        provider.declarations.keys.forEach(::resolveKey)
-
-        return resolved.toMap()
-    }
-
-    override fun contains(key: DependencyKey): Boolean =
-        resolved.contains(key) || provider.declarations.contains(key) || external.contains(key)
-
-    override fun <T> get(key: DependencyKey): T =
-        resolveKey(key).getOrThrow() as T
-
-    override fun <T> getOrPut(key: DependencyKey, defaultValue: () -> T): T =
-        resolved.getOrPut(key) {
-            runCatching {
-                defaultValue()
-            }
-        }.getOrThrow() as T
-
-    private fun resolveKey(key: DependencyKey): Result<*> =
-        resolved.getOrPut(key) {
-            if (!visited.add(key)) throw CircularDependencyException(listOf(key))
-            try {
-                val createFunction = provider.declarations[key]
-                    ?: return@getOrPut getExternal(key)
-                        ?: throw MissingDependencyException(key)
-                Result.success(createFunction.create(this))
-            } catch (cause: CircularDependencyException) {
-                // Always throw when encountering with circular references,
-                // capturing each key in the stack allows for better debugging
-                throw CircularDependencyException(listOf(key) + cause.keys)
-            } catch (cause: DependencyInjectionException) {
-                Result.failure(cause)
-            } catch (cause: Throwable) {
-                Result.failure(DependencyInjectionException("Failed to instantiate `$key`", cause))
-            }
-        }
-
-    private fun getExternal(key: DependencyKey): Result<Any>? =
-        if (external.contains(key)) {
-            Result.success(external.get(key))
-        } else {
-            null
-        }
+    /**
+     * Get the stack trace string from the point of the first external API frame.
+     */
+    fun externalTrace(): String =
+        stackTraceToString()
+            .substringAfterLast("io.ktor")
+            .substringAfter('\n')
 }
