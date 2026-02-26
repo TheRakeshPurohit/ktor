@@ -36,7 +36,7 @@ class DescribeRouteTest {
     private val jwtAudience = "test-audience"
     private val jwtAlgorithm = Algorithm.HMAC256(jwtSecret)
 
-    val testMessage = Message(1L, "Hello, world!", 16777216000)
+    val testMessage = Message.DM(1L, "Hello, world!", 16777216000)
 
     @OptIn(ExperimentalSerializationApi::class)
     val jsonFormat = Json {
@@ -283,6 +283,44 @@ class DescribeRouteTest {
         val openApiSpec = yamlFormat.decodeFromString<OpenApiDoc>(responseText)
         val pathItems: Map<String, ReferenceOr<PathItem>> = openApiSpec.paths
         assertEquals(1, pathItems.size)
+    }
+
+    @Test
+    fun parameterOrdering() = testApplication {
+        install(ContentNegotiation) {
+            json(jsonFormat)
+        }
+        @OptIn(ExperimentalKtorApi::class)
+        routing {
+            get("/routes") {
+                call.respond(
+                    OpenApiDoc(info = OpenApiInfo("Test API", "1.0.0")) +
+                        call.application.routingRoot.descendants()
+                )
+            }.hide()
+
+            get("/plugins/{category}/{product}/{version}") {
+                call.respondText((1..10).joinToString("\n") { i -> "plugin $i" })
+            }.describe {
+                parameters {
+                    query("expand") {
+                        description = "Show all details"
+                        required = false
+                    }
+                }
+                summary = "get messages"
+                description = "Retrieves a list of messages."
+            }
+        }
+
+        val routesResponse = client.get("/routes")
+        val apiSpec = Json.decodeFromString<OpenApiDoc>(routesResponse.bodyAsText())
+        val parameters = apiSpec.paths["/plugins/{category}/{product}/{version}"]
+            ?.valueOrNull()?.get?.parameters
+            ?.filterIsInstance<ReferenceOr.Value<Parameter>>()
+        assertNotNull(parameters, "Parameters not found")
+        val parameterNames = parameters.joinToString { it.value.name }
+        assertEquals("category, product, version, expand", parameterNames)
     }
 
     @Test
@@ -590,7 +628,7 @@ class DescribeRouteTest {
 
             route("/showing") {
                 get("/messages") {
-                    call.respond(listOf(Message(1L, "Message", 128734L)))
+                    call.respond(listOf(Message.DM(1L, "Message", 128734L)))
                 }
             }
         }
@@ -620,8 +658,22 @@ class DescribeRouteTest {
 }
 
 @Serializable
-data class Message(
-    val id: Long,
-    val content: String,
+sealed interface Message {
+    val id: Long
+    val content: String
     val timestamp: Long
-)
+
+    @Serializable
+    class DM(
+        override val id: Long,
+        override val content: String,
+        override val timestamp: Long
+    ) : Message
+
+    @Serializable
+    class Post(
+        override val id: Long,
+        override val content: String,
+        override val timestamp: Long
+    ) : Message
+}
